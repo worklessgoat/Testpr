@@ -77,7 +77,7 @@
         background: rgba(255,255,255,0.03); border: 1px solid var(--border-light); color: var(--col-white);
         padding: 10px 16px; border-radius: 6px; font-family: var(--font-ui); font-size: 0.8rem; font-weight: 600;
         cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; letter-spacing: 0.3px;
-        white-space: nowrap;
+        white-space: nowrap; touch-action: manipulation;
     }
     .btn:active { transform: translateY(1px); }
     
@@ -177,6 +177,7 @@
         background: transparent; overflow-y: auto; padding: 24px;
         display: flex; flex-direction: column; gap: 24px;
         width: 100%;
+        -webkit-overflow-scrolling: touch; /* Smooth scroll mobile */
     }
 
     /* --- WIDGETS --- */
@@ -191,7 +192,14 @@
         background: linear-gradient(180deg, rgba(38, 161, 123, 0.08) 0%, rgba(33, 38, 45, 0) 100%);
     }
     .bal-label { font-size: 0.85rem; color: var(--col-text-muted); margin-bottom: 8px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
-    .bal-val { font-family: var(--font-data); font-size: 3.5rem; font-weight: 700; line-height: 1; letter-spacing: -1.5px; margin: 5px 0 15px 0; color: #fff; }
+    /* Clamp: Dynamic font size between 2rem and 3.5rem depending on screen width */
+    .bal-val { 
+        font-family: var(--font-data); 
+        font-size: clamp(2rem, 5vw, 3.5rem); 
+        font-weight: 700; line-height: 1; 
+        letter-spacing: -1px; margin: 5px 0 15px 0; color: #fff; 
+        white-space: nowrap;
+    }
     .bal-pnl { display: flex; align-items: center; gap: 8px; color: var(--col-usdt); font-family: var(--font-data); font-size: 0.95rem; background: rgba(38, 161, 123, 0.1); padding: 4px 8px; border-radius: 4px; width: fit-content; }
     
     /* Chart */
@@ -217,8 +225,9 @@
         width: 100%; max-width: 460px;
         border-radius: 16px; overflow: hidden; box-shadow: 0 50px 100px -20px rgba(0,0,0,0.8);
         animation: slideIn 0.4s var(--ease-quart); transform-origin: bottom center;
+        max-height: 90vh; display: flex; flex-direction: column; /* Ensure mobile fit */
     }
-    .modal-body { padding: 32px; }
+    .modal-body { padding: 32px; overflow-y: auto; }
     .modal-footer { padding: 20px 32px; background: #0d1117; border-top: 1px solid var(--border-light); display: flex; gap: 12px; }
 
     /* Login Specific */
@@ -238,6 +247,7 @@
     @media (max-width: 1100px) {
         .workspace { grid-template-columns: 240px 1fr; }
         .sidebar-right { display: none; }
+        .hidden-mobile { display: none !important; }
     }
 
     @media (max-width: 768px) {
@@ -246,14 +256,15 @@
         .header { padding: 0 16px; height: 60px; }
         .nav-items { display: none; }
         .logo-area span { display: block; }
-        #clock { display: none; }
         .main-view { padding: 16px; gap: 16px; }
         .hero-section { flex-direction: column; align-items: flex-start; padding: 24px; }
+        /* Hero text adjustments for mobile */
         .hero-section .text-right { display: none; }
-        .bal-val { font-size: 2.8rem; }
         .modal-body { padding: 24px; }
         .modal-footer { padding: 16px 24px; }
-        .chart-container { height: 280px; }
+        .chart-container { height: 260px; } /* Shorter chart on mobile */
+        /* Adjust modal position for soft keyboard */
+        .modal { margin-bottom: 10vh; }
     }
 </style>
 
@@ -273,7 +284,7 @@
             
             <div class="input-group">
                 <span class="input-label">USER ID</span>
-                <input type="text" id="inp-id" class="input-std" placeholder="Enter ID">
+                <input type="text" id="inp-id" class="input-std" placeholder="Enter ID" autocapitalize="none">
             </div>
             <div class="input-group">
                 <span class="input-label">PASSWORD</span>
@@ -389,7 +400,7 @@
             <div class="text-mono text-xs text-muted hidden-mobile" id="clock">00:00:00 UTC</div>
             <button class="btn btn-primary" onclick="Engine.openWithdraw()">
                 <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 12V7H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16v7zm-3 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm3-2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7h18z"/></svg>
-                WITHDRAW USDT
+                <span class="hidden-mobile">WITHDRAW</span> USDT
             </button>
         </div>
     </header>
@@ -497,7 +508,9 @@
             const elapsed = (now - this.GENESIS_TIME) / 1000;
             
             // Profit = Time * Rate
-            const timeProfit = elapsed * this.GROWTH_RATE;
+            // If elapsed is negative (system time error), we clamp it to 0
+            const validElapsed = Math.max(0, elapsed);
+            const timeProfit = validElapsed * this.GROWTH_RATE;
             
             // Add a deterministic sine wave based on the Day of the Year 
             // This ensures "volatility" is consistent if you refresh on the same day
@@ -518,8 +531,15 @@
             // Clock
             setInterval(() => {
                 const now = new Date();
-                document.getElementById('clock').innerText = now.toISOString().split('T')[1].split('.')[0] + " UTC";
+                const timeStr = now.toISOString().split('T')[1].split('.')[0] + " UTC";
+                const el = document.getElementById('clock');
+                if(el) el.innerText = timeStr;
             }, 1000);
+            
+            // Handle Resize
+            window.addEventListener('resize', () => {
+                this.renderChart();
+            });
         },
 
         // --- AUTHENTICATION ---
@@ -601,16 +621,22 @@
             const fmt = (n) => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
             
             // Main Balance
-            document.getElementById('main-bal').innerText = fmt(this.currentBal);
-            document.getElementById('side-usd').innerText = fmt(this.currentBal);
+            const mainBalEl = document.getElementById('main-bal');
+            if(mainBalEl) mainBalEl.innerText = fmt(this.currentBal);
+            
+            const sideUsdEl = document.getElementById('side-usd');
+            if(sideUsdEl) sideUsdEl.innerText = fmt(this.currentBal);
             
             // PNL (Today/Session)
             const pnl = document.getElementById('main-pnl');
-            pnl.innerText = (this.sessionProfit >= 0 ? "+" : "") + fmt(this.sessionProfit);
-            pnl.style.color = this.sessionProfit >= 0 ? "var(--col-usdt)" : "var(--col-danger)";
+            if(pnl) {
+                pnl.innerText = (this.sessionProfit >= 0 ? "+" : "") + fmt(this.sessionProfit);
+                pnl.style.color = this.sessionProfit >= 0 ? "var(--col-usdt)" : "var(--col-danger)";
+            }
 
             // Modal
-            document.getElementById('modal-bal').innerText = fmt(this.currentBal) + " USDT";
+            const modalBal = document.getElementById('modal-bal');
+            if(modalBal) modalBal.innerText = fmt(this.currentBal) + " USDT";
         },
 
         // --- WITHDRAWALS ---
@@ -668,6 +694,8 @@
                 { s: 'TRX', p: '$0.18', c: '+2.1%', up: true }
             ];
             const con = document.getElementById('watchlist');
+            if(!con) return;
+            
             coins.forEach(c => {
                 con.innerHTML += `
                 <div class="list-item">
@@ -688,6 +716,8 @@
                 { t: "TRC20 Volume +12%", i: "📊" }
             ];
             const con = document.getElementById('feed-container');
+            if(!con) return;
+
             setInterval(() => {
                 const m = msgs[Math.floor(Math.random() * msgs.length)];
                 const div = document.createElement('div');
@@ -708,6 +738,8 @@
 
         addLog(amount, type) {
             const con = document.getElementById('tx-log');
+            if(!con) return;
+
             const isWin = amount > 0;
             const hash = Math.random().toString(36).substring(2,10).toUpperCase();
             
@@ -774,11 +806,16 @@
 
         renderChart() {
             const cvs = document.getElementById('chart-canvas');
+            if(!cvs) return;
             const ctx = cvs.getContext('2d');
             
             // Fix DPI
             const dpr = window.devicePixelRatio || 1;
             const rect = cvs.getBoundingClientRect();
+            
+            // Safety check for hidden elements
+            if(rect.width === 0 || rect.height === 0) return;
+
             cvs.width = rect.width * dpr;
             cvs.height = rect.height * dpr;
             ctx.scale(dpr, dpr);
@@ -834,6 +871,7 @@
         
         initCanvas() {
             const cvs = document.getElementById('bg-canvas');
+            if(!cvs) return;
             const ctx = cvs.getContext('2d');
             
             const resize = () => { cvs.width = window.innerWidth; cvs.height = window.innerHeight; };
