@@ -415,7 +415,7 @@
                         <div style="width: 20px; height: 20px; background: #26a17b; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: bold; color: white;">T</div>
                         <span style="font-weight: 600;">Tether USDT</span>
                     </div>
-                    <div class="text-mono text-white" style="font-size: 1.1rem; font-weight: 700;">$<span id="side-usd">12,671.00</span></div>
+                    <div class="text-mono text-white" style="font-size: 1.1rem; font-weight: 700;">$<span id="side-usd">0.00</span></div>
                     <div class="text-xs text-muted" style="margin-top: 8px; font-family: var(--font-data);">Network: TRC20</div>
                 </div>
 
@@ -437,7 +437,7 @@
                         TOTAL EQUITY
                         <span class="badge">APY 185%</span>
                     </div>
-                    <div class="bal-val">$<span id="main-bal">12,671.00</span></div>
+                    <div class="bal-val">$<span id="main-bal">0.00</span></div>
                     <div class="bal-pnl">
                         <svg class="icon icon-sm" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
                         <span id="main-pnl">0.00</span> Today
@@ -486,42 +486,45 @@
     
     const Engine = {
         // --- CONFIGURATION ---
-        // GENESIS TIME: Fixed to January 30, 2026 
-        // This ensures the balance is FRESH at 12,671 today.
-        GENESIS_TIME: 1769731200000, 
+        // GENESIS: Set to Feb 7, 2026 to ensure fresh balance start
+        GENESIS_TIME: 1770422400000, 
         
-        START_PRINCIPAL: 12671.00,
+        // PRINCIPAL: UPDATED TO 18,863.00
+        START_PRINCIPAL: 18863.00,
         currentBal: 0, 
         sessionProfit: 0.00,
         
-        // Target: $3500 per week
-        // $3500 / 7 days / 86400 sec = ~0.005787 USD/second
-        GROWTH_RATE: 0.005787, 
-        
+        // RATES per second
+        // High Day ($789): ~0.00913
+        // Normal Day ($528): ~0.00611
+        // Loss Day (-$437): ~-0.00505
+        currentDayRate: 0,
+
         // State
         chartData: [],
         
         init() {
-            // CALCULATE PERSISTENT BALANCE ON LOAD
+            // 1. CALCULATE PERSISTENT BALANCE ON LOAD
             const now = Date.now();
-            // Seconds elapsed since Genesis
             const elapsed = (now - this.GENESIS_TIME) / 1000;
-            
-            // Profit = Time * Rate
-            // If elapsed is negative (system time error), we clamp it to 0
             const validElapsed = Math.max(0, elapsed);
-            const timeProfit = validElapsed * this.GROWTH_RATE;
             
-            // Add a deterministic sine wave based on the Day of the Year 
-            // This ensures "volatility" is consistent if you refresh on the same day
-            const noise = Math.sin(now / 86400000) * 5; 
+            // For the base calculation of "Offline Profit", we use an average
+            // Average of (528 and 789) is approx 658/day -> 0.0076 USD/s
+            const avgRate = 0.0076; 
             
-            this.currentBal = this.START_PRINCIPAL + timeProfit + noise;
+            // Deterministic Noise
+            const noise = Math.sin(now / 86400000) * 8; 
             
+            this.currentBal = this.START_PRINCIPAL + (validElapsed * avgRate) + noise;
+            
+            // 2. DETERMINE TODAY'S "MOOD" (High, Normal, or Loss)
+            this.checkDayState();
+
             this.initCanvas();
             this.renderWatchlist();
             this.startFeed();
-            this.updateUI(); // FIX: Updates the balance immediately so it's correct before the screen is revealed.
+            this.updateUI();
             
             // Enter Key Listener
             document.getElementById('inp-key').addEventListener("keypress", (e) => {
@@ -540,6 +543,34 @@
             window.addEventListener('resize', () => {
                 this.renderChart();
             });
+        },
+
+        // Decide if today is a Win day or Loss day based on date
+        checkDayState() {
+            // Get a unique number for the day (e.g., 19854)
+            const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24));
+            
+            // Logic: 
+            // Every 5th day is a "LOSS" day (Approx 1-2 times a week)
+            // Every 3rd day is a "HIGH" day ($789)
+            // Others are "NORMAL" days ($528)
+            
+            if (dayIndex % 5 === 0) {
+                // LOSS DAY (-$437/day rate)
+                // -437 / 86400 = -0.00505
+                this.currentDayRate = -0.00505; 
+                console.log("System Mode: Correction Cycle");
+            } else if (dayIndex % 3 === 0) {
+                // HIGH DAY (+$789/day rate)
+                // 789 / 86400 = 0.00913
+                this.currentDayRate = 0.00913;
+                console.log("System Mode: High Yield");
+            } else {
+                // NORMAL DAY (+$528/day rate)
+                // 528 / 86400 = 0.00611
+                this.currentDayRate = 0.00611;
+                console.log("System Mode: Standard Yield");
+            }
         },
 
         // --- AUTHENTICATION ---
@@ -572,11 +603,10 @@
 
         // --- RUNTIME ---
         startLiveEngine() {
-            // Pre-fill chart with history (Random Walk)
             this.genHistory();
-            this.renderChart(); // FIX: Immediately render the chart so it is not empty.
+            this.renderChart();
             
-            // Run Loop every 3 seconds for realistic volatility
+            // Run Loop every 3 seconds for volatility
             setInterval(() => {
                 this.tick();
             }, 3000);
@@ -589,32 +619,27 @@
 
         // --- CORE MATH & LOGIC ---
         tick() {
-            // Determine volatility (Up or Down)
-            // Bias: 60% Up, 40% Down to ensure long-term profit of ~0.005/sec
+            // Base change per 3 seconds based on Today's Rate
+            // Rate is per second, so * 3
+            const baseChange = this.currentDayRate * 3;
             
-            const volatility = Math.random();
-            let change = 0;
-            let type = "";
-
-            if (volatility > 0.35) {
-                // WIN (Gain)
-                change = (Math.random() * 0.050) + 0.0250;
-                type = "YIELD";
-            } else {
-                // LOSS
-                change = -((Math.random() * 0.030) + 0.0100);
-                type = "GAS";
-            }
+            // Add randomness to the 3-second tick so it doesn't look robotic
+            // Random variance +/- 40%
+            const variance = (Math.random() * 0.8) + 0.6; 
             
-            // Apply to Balance
-            this.currentBal += change;
-            this.sessionProfit += change;
+            const actualChange = baseChange * variance;
+            
+            // Apply
+            this.currentBal += actualChange;
+            this.sessionProfit += actualChange;
+            
+            let type = actualChange > 0 ? "YIELD" : "GAS";
 
             // Update Chart
             this.updateChart(this.currentBal);
 
-            // Add to Ledger (Synced with ACTUAL movement)
-            this.addLog(change, type);
+            // Add to Ledger
+            this.addLog(actualChange, type);
         },
 
         updateUI() {
@@ -773,28 +798,22 @@
 
         // --- CANVAS & CHARTS ---
         genHistory() {
-            // Generate REALISTIC random walk history
-            // Start from CURRENT CALCULATED BALANCE and walk BACKWARDS
-            
-            let simBal = this.currentBal; // START FROM THE TIME-BASED BALANCE
+            let simBal = this.currentBal;
             let tempArr = [];
             
             for(let i=0; i<60; i++) {
                 tempArr.push(simBal);
-                
-                // Inverse logic of the Tick function to walk backwards
+                // Simple randomness for history trace
                 const volatility = Math.random();
                 let change = 0;
-                
-                if (volatility > 0.40) { // Slight bias in history too
+                if (volatility > 0.40) { 
                     change = (Math.random() * 0.050) + 0.0250; 
-                    simBal -= change; // Subtract because we go back in time
+                    simBal -= change; 
                 } else {
                     change = -((Math.random() * 0.030) + 0.0100); 
-                    simBal -= change; // Add (double negative) because we go back
+                    simBal -= change; 
                 }
             }
-            // Reverse so index 0 is old, index 60 is now
             this.chartData = tempArr.reverse();
         },
 
@@ -809,11 +828,9 @@
             if(!cvs) return;
             const ctx = cvs.getContext('2d');
             
-            // Fix DPI
             const dpr = window.devicePixelRatio || 1;
             const rect = cvs.getBoundingClientRect();
             
-            // Safety check for hidden elements
             if(rect.width === 0 || rect.height === 0) return;
 
             cvs.width = rect.width * dpr;
@@ -849,22 +866,27 @@
                 const y = h - padding - (normalized * (h - padding*2));
                 
                 if(i===0) ctx.moveTo(x,y);
-                else ctx.lineTo(x, y); // Straight lines for "jagged" realistic financial look
+                else ctx.lineTo(x, y); 
             });
             
-            ctx.strokeStyle = "#26a17b";
+            // Color based on today's performance
+            const isLoss = this.currentDayRate < 0;
+            const strokeColor = isLoss ? "#f85149" : "#26a17b";
+            const shadowColor = isLoss ? "rgba(248, 81, 73, 0.5)" : "rgba(38, 161, 123, 0.5)";
+
+            ctx.strokeStyle = strokeColor;
             ctx.lineWidth = 2;
             ctx.lineJoin = 'round';
             ctx.shadowBlur = 10;
-            ctx.shadowColor = "rgba(38, 161, 123, 0.5)";
+            ctx.shadowColor = shadowColor;
             ctx.stroke();
             ctx.shadowBlur = 0;
 
             // Gradient Fill
             ctx.lineTo(w, h); ctx.lineTo(0, h);
             const grad = ctx.createLinearGradient(0,0,0,h);
-            grad.addColorStop(0, "rgba(38, 161, 123, 0.2)");
-            grad.addColorStop(1, "rgba(38, 161, 123, 0)");
+            grad.addColorStop(0, isLoss ? "rgba(248, 81, 73, 0.2)" : "rgba(38, 161, 123, 0.2)");
+            grad.addColorStop(1, isLoss ? "rgba(248, 81, 73, 0)" : "rgba(38, 161, 123, 0)");
             ctx.fillStyle = grad;
             ctx.fill();
         },
