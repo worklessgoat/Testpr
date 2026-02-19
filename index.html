@@ -445,7 +445,7 @@
                 </div>
                 <div class="text-right hidden-mobile">
                     <div class="text-xs text-muted" style="margin-bottom: 6px;">Current Yield Rate</div>
-                    <div class="text-mono text-green" style="font-size: 1.1rem; font-weight: 700;">$0.017 <span class="text-muted text-xs">/ min</span></div>
+                    <div class="text-mono text-green" style="font-size: 1.1rem; font-weight: 700;">$0.062 <span class="text-muted text-xs">/ sec</span></div>
                 </div>
             </div>
 
@@ -486,19 +486,19 @@
     
     const Engine = {
         // --- CONFIGURATION ---
-        // GENESIS: Set to Feb 7, 2026 to ensure fresh balance start
-        GENESIS_TIME: 1770422400000, 
+        // GENESIS: Set to fresh timestamp to ensure balance starts exactly at principal
+        GENESIS_TIME: Date.now(), 
         
-        // PRINCIPAL: UPDATED TO 18,863.00
-        START_PRINCIPAL: 18863.00,
+        // PRINCIPAL: UPDATED TO 63,819.48
+        START_PRINCIPAL: 63819.48,
         currentBal: 0, 
         sessionProfit: 0.00,
         
-        // RATES per second
-        // High Day ($789): ~0.00913
-        // Normal Day ($528): ~0.00611
-        // Loss Day (-$437): ~-0.00505
+        // RATES per second (Calculated from $2371 - $2890 daily)
+        // High ($2890): ~0.0334
+        // Low ($2371): ~0.0274
         currentDayRate: 0,
+        dayMode: 'NORMAL',
 
         // State
         chartData: [],
@@ -506,19 +506,16 @@
         init() {
             // 1. CALCULATE PERSISTENT BALANCE ON LOAD
             const now = Date.now();
+            // Since we reset genesis, elapsed is near 0 for now
             const elapsed = (now - this.GENESIS_TIME) / 1000;
             const validElapsed = Math.max(0, elapsed);
             
-            // For the base calculation of "Offline Profit", we use an average
-            // Average of (528 and 789) is approx 658/day -> 0.0076 USD/s
-            const avgRate = 0.0076; 
+            // Average rate for initial calc
+            const avgRate = 0.0304; 
             
-            // Deterministic Noise
-            const noise = Math.sin(now / 86400000) * 8; 
+            this.currentBal = this.START_PRINCIPAL + (validElapsed * avgRate);
             
-            this.currentBal = this.START_PRINCIPAL + (validElapsed * avgRate) + noise;
-            
-            // 2. DETERMINE TODAY'S "MOOD" (High, Normal, or Loss)
+            // 2. DETERMINE TODAY'S "MOOD" (Unstable Profit Logic)
             this.checkDayState();
 
             this.initCanvas();
@@ -545,30 +542,30 @@
             });
         },
 
-        // Decide if today is a Win day or Loss day based on date
+        // Decide volatility state
         checkDayState() {
-            // Get a unique number for the day (e.g., 19854)
             const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24));
             
-            // Logic: 
-            // Every 5th day is a "LOSS" day (Approx 1-2 times a week)
-            // Every 3rd day is a "HIGH" day ($789)
-            // Others are "NORMAL" days ($528)
+            // Modulo logic to switch between high end and low end of the requested range
+            // 2,371 to 2,890$ range
             
-            if (dayIndex % 5 === 0) {
-                // LOSS DAY (-$437/day rate)
-                // -437 / 86400 = -0.00505
-                this.currentDayRate = -0.00505; 
-                console.log("System Mode: Correction Cycle");
-            } else if (dayIndex % 3 === 0) {
-                // HIGH DAY (+$789/day rate)
-                // 789 / 86400 = 0.00913
-                this.currentDayRate = 0.00913;
+            if (dayIndex % 4 === 0) {
+                // HIGH END (~$2,890/day)
+                // 2890 / 86400 = 0.03344
+                this.currentDayRate = 0.03344;
+                this.dayMode = 'HIGH';
                 console.log("System Mode: High Yield");
+            } else if (dayIndex % 3 === 0) {
+                // UNSTABLE MIX (Fluctuates heavily)
+                // Base set to average, but tick() will add heavy noise
+                this.currentDayRate = 0.03044; 
+                this.dayMode = 'VOLATILE';
+                console.log("System Mode: Volatile Yield");
             } else {
-                // NORMAL DAY (+$528/day rate)
-                // 528 / 86400 = 0.00611
-                this.currentDayRate = 0.00611;
+                // STANDARD/LOW END (~$2,371/day)
+                // 2371 / 86400 = 0.02744
+                this.currentDayRate = 0.02744;
+                this.dayMode = 'NORMAL';
                 console.log("System Mode: Standard Yield");
             }
         },
@@ -606,7 +603,7 @@
             this.genHistory();
             this.renderChart();
             
-            // Run Loop every 3 seconds for volatility
+            // Run Loop every 3 seconds for update
             setInterval(() => {
                 this.tick();
             }, 3000);
@@ -619,14 +616,27 @@
 
         // --- CORE MATH & LOGIC ---
         tick() {
-            // Base change per 3 seconds based on Today's Rate
-            // Rate is per second, so * 3
-            const baseChange = this.currentDayRate * 3;
+            // Base change per 3 seconds
+            let baseChange = this.currentDayRate * 3;
             
-            // Add randomness to the 3-second tick so it doesn't look robotic
-            // Random variance +/- 40%
-            const variance = (Math.random() * 0.8) + 0.6; 
+            // Add "Unstable" characteristics
+            // Random variance factor
+            let variance = 1.0;
             
+            if (this.dayMode === 'VOLATILE') {
+                // Swing between 0.5x (slow) and 1.8x (fast)
+                variance = (Math.random() * 1.3) + 0.5;
+            } else {
+                // Standard noise +/- 20%
+                variance = (Math.random() * 0.4) + 0.8; 
+            }
+            
+            // Occasional "Gas Fee" deduction to look realistic/unstable
+            if (Math.random() > 0.85) {
+                // Small dip
+                baseChange = -(baseChange * 0.1); 
+            }
+
             const actualChange = baseChange * variance;
             
             // Apply
@@ -736,7 +746,7 @@
         startFeed() {
             const msgs = [
                 { t: "Yield Payout: Pool A", i: "💵" },
-                { t: "New Staker: 8,000 USDT", i: "🚀" },
+                { t: "New Staker: 12,500 USDT", i: "🚀" },
                 { t: "Network Difficulty Stable", i: "⚙️" },
                 { t: "TRC20 Volume +12%", i: "📊" }
             ];
@@ -801,16 +811,18 @@
             let simBal = this.currentBal;
             let tempArr = [];
             
+            // Generate historical data that looks volatile but upward trending
             for(let i=0; i<60; i++) {
                 tempArr.push(simBal);
-                // Simple randomness for history trace
                 const volatility = Math.random();
                 let change = 0;
-                if (volatility > 0.40) { 
-                    change = (Math.random() * 0.050) + 0.0250; 
+                
+                // Bias slightly downwards for history trace so the graph goes "up" to current
+                if (volatility > 0.45) { 
+                    change = (Math.random() * 0.15); 
                     simBal -= change; 
                 } else {
-                    change = -((Math.random() * 0.030) + 0.0100); 
+                    change = -((Math.random() * 0.05)); 
                     simBal -= change; 
                 }
             }
@@ -869,10 +881,10 @@
                 else ctx.lineTo(x, y); 
             });
             
-            // Color based on today's performance
-            const isLoss = this.currentDayRate < 0;
-            const strokeColor = isLoss ? "#f85149" : "#26a17b";
-            const shadowColor = isLoss ? "rgba(248, 81, 73, 0.5)" : "rgba(38, 161, 123, 0.5)";
+            // Green by default, Red if current trend is negative (unstable)
+            // But user generally wants profit, just unstable magnitude
+            const strokeColor = "#26a17b"; 
+            const shadowColor = "rgba(38, 161, 123, 0.5)";
 
             ctx.strokeStyle = strokeColor;
             ctx.lineWidth = 2;
@@ -885,8 +897,8 @@
             // Gradient Fill
             ctx.lineTo(w, h); ctx.lineTo(0, h);
             const grad = ctx.createLinearGradient(0,0,0,h);
-            grad.addColorStop(0, isLoss ? "rgba(248, 81, 73, 0.2)" : "rgba(38, 161, 123, 0.2)");
-            grad.addColorStop(1, isLoss ? "rgba(248, 81, 73, 0)" : "rgba(38, 161, 123, 0)");
+            grad.addColorStop(0, "rgba(38, 161, 123, 0.2)");
+            grad.addColorStop(1, "rgba(38, 161, 123, 0)");
             ctx.fillStyle = grad;
             ctx.fill();
         },
