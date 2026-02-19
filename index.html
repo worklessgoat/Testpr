@@ -486,8 +486,8 @@
     
     const Engine = {
         // --- CONFIGURATION ---
-        // GENESIS: Set to fresh timestamp to ensure balance starts exactly at principal
-        GENESIS_TIME: Date.now(), 
+        // GENESIS: Hardcoded timestamp so balance continuously grows and never resets
+        GENESIS_TIME: 1771500000000, 
         
         // PRINCIPAL: UPDATED TO 63,819.48
         START_PRINCIPAL: 63819.48,
@@ -506,7 +506,6 @@
         init() {
             // 1. CALCULATE PERSISTENT BALANCE ON LOAD
             const now = Date.now();
-            // Since we reset genesis, elapsed is near 0 for now
             const elapsed = (now - this.GENESIS_TIME) / 1000;
             const validElapsed = Math.max(0, elapsed);
             
